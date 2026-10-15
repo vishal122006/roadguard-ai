@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Dataset files and caches
+/data/
+/dataset/
+RoadGuardData/
+RoadGuardYOLO/
+*.zip
+*.cache
+
+# Training runs, large checkpoints, and generated output
+/runs/
+/model_runs/
+/weights/
+*.pt
+*.onnx
+*.engine
+
+# Local Streamlit state
+.streamlit/secrets.toml
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
