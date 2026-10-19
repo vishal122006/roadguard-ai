@@ -1,6 +1,6 @@
-streamlit>=1.41
-ultralytics>=8.3
-numpy>=1.24
+streamlit>=1.41,<2
+ultralytics-opencv-headless>=8.3,<9
+numpy>=1.24,<3
 Pillow>=10.0
 PyYAML>=6.0
 torch>=2.0
