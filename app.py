@@ -1,20 +1,38 @@
 from pathlib import Path
 import os
 
-import numpy as np
 import streamlit as st
-import torch
-from PIL import Image
-from ultralytics import YOLO
-
-DEFAULT_MODEL_PATH = Path(__file__).parent / "weights" / "best.pt"
-MODEL_PATH = Path(os.getenv("ROADGUARD_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
 
 st.set_page_config(
     page_title="RoadGuard AI",
     page_icon="🛣️",
     layout="wide",
 )
+
+# Keep dependency failures inside the app UI so the page can explain the issue.
+# The detailed import error remains available to the app owner in Cloud logs.
+try:
+    import numpy as np
+    import torch
+    from PIL import Image
+    from ultralytics import YOLO
+except Exception as exc:
+    print(
+        "RoadGuard AI inference dependency import failed: "
+        f"{type(exc).__name__}: {exc}",
+        flush=True,
+    )
+    st.title("🛣️ RoadGuard AI")
+    st.error(
+        "The real YOLO/OpenCV inference runtime could not be loaded. "
+        "Predictions are unavailable until the dependency issue is fixed. "
+        "This app does not generate synthetic or demo predictions."
+    )
+    st.caption("Open Manage app → Logs to view the detailed import error.")
+    st.stop()
+
+DEFAULT_MODEL_PATH = Path(__file__).parent / "weights" / "best.pt"
+MODEL_PATH = Path(os.getenv("ROADGUARD_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
 
 
 @st.cache_resource
@@ -39,6 +57,13 @@ st.info(
     "a 'no detections' result does not mean a road is damage-free."
 )
 
+if not MODEL_PATH.is_file():
+    st.warning(
+        "The trained checkpoint is not available. Real predictions are disabled "
+        "until your actual best.pt file is made available at weights/best.pt "
+        "or through ROADGUARD_MODEL_PATH. No synthetic/demo output will be used."
+    )
+
 confidence = st.slider(
     "Detection confidence threshold",
     min_value=0.05,
@@ -57,7 +82,11 @@ if uploaded_file is not None:
         image = Image.open(uploaded_file).convert("RGB")
         st.image(image, caption="Uploaded road photograph", width="stretch")
 
-        if st.button("Detect road damage", type="primary"):
+        if st.button(
+            "Detect road damage",
+            type="primary",
+            disabled=not MODEL_PATH.is_file(),
+        ):
             try:
                 with st.spinner("Analyzing image..."):
                     model = load_model(str(MODEL_PATH))
@@ -102,7 +131,15 @@ if uploaded_file is not None:
                         "This does not guarantee that the road is damage-free."
                     )
             except Exception as exc:
-                st.error(f"Could not run inference: {exc}")
+                print(
+                    "RoadGuard AI inference failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+                st.error(
+                    "Inference failed. Check Manage app → Logs for the detailed "
+                    "error. No fallback or synthetic predictions were substituted."
+                )
     except Exception as exc:
         st.error(f"Could not read the uploaded image: {exc}")
 
