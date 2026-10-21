@@ -257,12 +257,28 @@ if uploaded_file is not None:
                 input_canvas.paste(display_image, (offset_x, offset_y))
                 annotated_image = input_canvas.copy()
                 draw = ImageDraw.Draw(annotated_image)
+                # Labels are drawn on a 1280px canvas that may be scaled down
+                # by Streamlit (especially on mobile). Use a bold, fixed-size font
+                # so names like "Alligator Crack" remain legible after display scaling.
                 try:
                     from PIL import ImageFont
-                    label_font = ImageFont.truetype(
-                        "DejaVuSans.ttf",
-                        size=max(14, min(24, int(18 * display_scale))),
-                    )
+                    font_candidates = [
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+                        "DejaVuSans-Bold.ttf",
+                    ]
+                    label_font = None
+                    for font_path in font_candidates:
+                        try:
+                            label_font = ImageFont.truetype(font_path, size=34)
+                            break
+                        except OSError:
+                            continue
+                    if label_font is None:
+                        try:
+                            label_font = ImageFont.load_default(size=30)
+                        except TypeError:
+                            label_font = ImageFont.load_default()
                 except Exception:
                     label_font = ImageFont.load_default()
 
@@ -326,10 +342,12 @@ if uploaded_file is not None:
                     sy1 = int(round(y1 * display_scale)) + offset_y
                     sx2 = int(round(x2 * display_scale)) + offset_x
                     sy2 = int(round(y2 * display_scale)) + offset_y
-                    line_width = max(3, int(round(3 * display_scale)))
+                    # Keep boxes thick enough to see after the canvas is displayed
+                    # at a smaller width in the browser.
+                    line_width = 5
                     draw.rectangle(
                         (sx1, sy1, sx2, sy2),
-                        outline=(255, 70, 70),
+                        outline=(255, 60, 60),
                         width=line_width,
                     )
                     short_type = likely_type
