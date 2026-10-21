@@ -9,8 +9,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Keep dependency failures inside the app UI so the page can explain the issue.
-# The detailed import error remains available to the app owner in Cloud logs.
 try:
     import numpy as np
     import torch
@@ -24,44 +22,92 @@ except Exception as exc:
     )
     st.title("🛣️ RoadGuard AI")
     st.error(
-        "The real YOLO/OpenCV inference runtime could not be loaded. "
+        "The YOLO inference runtime could not be loaded. "
         "Predictions are unavailable until the dependency issue is fixed. "
         "This app does not generate synthetic or demo predictions."
     )
     st.caption("Open Manage app → Logs to view the detailed import error.")
     st.stop()
 
-DEFAULT_MODEL_PATH = Path(__file__).parent / "weights" / "best.pt"
-MODEL_PATH = Path(os.getenv("ROADGUARD_MODEL_PATH", str(DEFAULT_MODEL_PATH)))
+APP_DIR = Path(__file__).parent
+DEFAULT_MODEL_PATH = APP_DIR / "weights" / "best.pt"
+CUSTOM_MODEL_ENV = os.getenv("ROADGUARD_MODEL_PATH", "").strip()
+USE_PUBLIC_BASELINE = os.getenv("ROADGUARD_USE_PUBLIC_BASELINE", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+BASELINE_REPO_ID = os.getenv(
+    "ROADGUARD_BASELINE_REPO_ID",
+    "vinothvikas1987/pothole-detection-yolov8",
+).strip()
+BASELINE_FILENAME = os.getenv("ROADGUARD_BASELINE_FILENAME", "best.pt").strip()
+
+
+def resolve_checkpoint() -> tuple[str, str]:
+    """Find a real checkpoint; never substitute fabricated detections."""
+    if CUSTOM_MODEL_ENV:
+        custom_path = Path(CUSTOM_MODEL_ENV).expanduser()
+        if not custom_path.is_file():
+            raise FileNotFoundError(
+                "ROADGUARD_MODEL_PATH is set, but the checkpoint does not exist: "
+                f"{custom_path}"
+            )
+        return str(custom_path), "Custom RoadGuard checkpoint (ROADGUARD_MODEL_PATH)"
+
+    if DEFAULT_MODEL_PATH.is_file():
+        return str(DEFAULT_MODEL_PATH), "Project checkpoint (weights/best.pt)"
+
+    if not USE_PUBLIC_BASELINE:
+        raise FileNotFoundError(
+            "No local checkpoint was found and the public baseline is disabled. "
+            "Add weights/best.pt or set ROADGUARD_MODEL_PATH."
+        )
+
+    # Public community baseline trained on real road-damage data. This is a
+    # fallback only; it is not represented as the project's own trained model.
+    from huggingface_hub import hf_hub_download
+
+    checkpoint_path = hf_hub_download(
+        repo_id=BASELINE_REPO_ID,
+        filename=BASELINE_FILENAME,
+    )
+    return (
+        checkpoint_path,
+        f"Public community baseline: {BASELINE_REPO_ID}/{BASELINE_FILENAME}",
+    )
 
 
 @st.cache_resource
-def load_model(model_path: str) -> YOLO:
-    path = Path(model_path)
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Model weights not found at {path}. Add weights/best.pt or set "
-            "the ROADGUARD_MODEL_PATH environment variable."
-        )
-    return YOLO(str(path))
+def load_model() -> tuple[YOLO, str]:
+    checkpoint_path, model_source = resolve_checkpoint()
+    return YOLO(checkpoint_path), model_source
 
 
 st.title("🛣️ RoadGuard AI")
 st.subheader("Deep Learning-Based Road Damage Detection")
 st.write(
-    "Upload a road photograph to detect visible potholes, cracks, and manholes. "
-    "The model returns predicted bounding boxes and confidence scores."
+    "Upload a real road photograph to detect visible road damage. "
+    "The app displays model-produced bounding boxes, class names, and confidence scores."
 )
 st.info(
-    "Research prototype only. Predictions can be missed or incorrect; "
+    "Research prototype only. Detections can be missed or incorrect; "
     "a 'no detections' result does not mean a road is damage-free."
 )
 
-if not MODEL_PATH.is_file():
+if CUSTOM_MODEL_ENV and not Path(CUSTOM_MODEL_ENV).expanduser().is_file():
+    st.error(
+        "ROADGUARD_MODEL_PATH points to a missing file. Correct that setting or "
+        "remove it to allow the public baseline fallback."
+    )
+elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and USE_PUBLIC_BASELINE:
     st.warning(
-        "The trained checkpoint is not available. Real predictions are disabled "
-        "until your actual best.pt file is made available at weights/best.pt "
-        "or through ROADGUARD_MODEL_PATH. No synthetic/demo output will be used."
+        "Your own trained checkpoint was not found. The app will use a real, "
+        "publicly hosted road-damage baseline instead. Its labels and performance "
+        "may differ from your custom RoadGuard model. It is not a synthetic/demo model."
+    )
+elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and not USE_PUBLIC_BASELINE:
+    st.warning(
+        "No checkpoint is available. Add weights/best.pt, set ROADGUARD_MODEL_PATH, "
+        "or enable ROADGUARD_USE_PUBLIC_BASELINE=true."
     )
 
 confidence = st.slider(
@@ -82,14 +128,10 @@ if uploaded_file is not None:
         image = Image.open(uploaded_file).convert("RGB")
         st.image(image, caption="Uploaded road photograph", width="stretch")
 
-        if st.button(
-            "Detect road damage",
-            type="primary",
-            disabled=not MODEL_PATH.is_file(),
-        ):
+        if st.button("Detect road damage", type="primary"):
             try:
-                with st.spinner("Analyzing image..."):
-                    model = load_model(str(MODEL_PATH))
+                with st.spinner("Loading the checkpoint and analyzing image..."):
+                    model, model_source = load_model()
                     device = 0 if torch.cuda.is_available() else "cpu"
                     result = model.predict(
                         source=np.asarray(image),
@@ -106,7 +148,7 @@ if uploaded_file is not None:
                 with result_col:
                     st.image(
                         annotated_rgb,
-                        caption="RoadGuard AI predictions",
+                        caption="Road-damage model predictions",
                         width="stretch",
                     )
 
@@ -121,6 +163,13 @@ if uploaded_file is not None:
                         }
                     )
 
+                st.caption(f"Model source: {model_source}")
+                st.caption(
+                    "Class names come from the loaded checkpoint. The public baseline "
+                    "uses road-damage categories including longitudinal/transverse/"
+                    "alligator cracks, potholes, and an 'Other' category; 'Other' is "
+                    "not a dedicated manhole label."
+                )
                 st.subheader("Detection summary")
                 st.metric("Detected objects", len(detections))
                 if detections:
@@ -137,13 +186,15 @@ if uploaded_file is not None:
                     flush=True,
                 )
                 st.error(
-                    "Inference failed. Check Manage app → Logs for the detailed "
-                    "error. No fallback or synthetic predictions were substituted."
+                    "Model loading or inference failed. Check Manage app → Logs for "
+                    "the detailed error. No fallback or synthetic predictions were substituted."
                 )
     except Exception as exc:
         st.error(f"Could not read the uploaded image: {exc}")
 
 st.caption(
     "RoadGuard AI is an academic prototype and should not be used as the sole "
-    "basis for road-safety or maintenance decisions."
+    "basis for road-safety or maintenance decisions. The public fallback model is "
+    "provided by vinothvikas1987 on Hugging Face under its published Apache-2.0 license; "
+    "review the model card and dataset terms before further redistribution or commercial use."
 )
