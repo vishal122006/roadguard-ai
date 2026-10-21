@@ -122,6 +122,37 @@ elif not DEFAULT_MODEL_PATH.is_file() and not CUSTOM_MODEL_ENV and not USE_PUBLI
         "or enable ROADGUARD_USE_PUBLIC_BASELINE=true."
     )
 
+if st.button("Check model availability"):
+    try:
+        with st.spinner("Checking that the real model can be downloaded and loaded..."):
+            health_model, health_source, health_is_fallback = load_model()
+        st.success("Model loaded successfully. Real inference is ready.")
+        st.write(f"**Model source:** {health_source}")
+        names = getattr(health_model, "names", {})
+        if isinstance(names, dict):
+            class_names = [names[k] for k in sorted(names)]
+        elif isinstance(names, (list, tuple)):
+            class_names = list(names)
+        else:
+            class_names = []
+        if class_names:
+            st.write("**Classes:** " + ", ".join(str(name) for name in class_names))
+        if health_is_fallback:
+            st.info(
+                "This is the public community baseline, not your own trained checkpoint. "
+                "It has no dedicated manhole class."
+            )
+    except Exception as exc:
+        print(
+            "RoadGuard model availability check failed: "
+            f"{type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        st.error(
+            f"Model check failed ({type(exc).__name__}). Check Manage app → Logs. "
+            "No fake prediction was generated."
+        )
+
 confidence = st.slider(
     "Detection confidence threshold",
     min_value=0.05,
