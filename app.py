@@ -182,9 +182,9 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file).convert("RGB")
-        # Preserve the original PIL image for inference. Only cap the UI preview
-        # width so a small upload is not stretched across a very wide browser.
-        preview_width = min(image.width, 1000)
+        # Preserve the original PIL image for inference. The UI preview is shown
+        # full-width; tiny source images trigger a warning because resizing cannot
+        # recover detail that is not present in the uploaded file.
         st.caption(
             f"Source image: {image.width} × {image.height} pixels. "
             "Detection runs on the original uploaded pixels."
