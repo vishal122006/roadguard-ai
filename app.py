@@ -144,6 +144,16 @@ if uploaded_file is not None:
                         verbose=False,
                     )[0]
 
+                # Make the third-party model's broad "Other" category clearer
+                # in both the plotted boxes and the summary. This is a display-only
+                # label change; it does not claim that the object is a manhole or
+                # change the model's underlying prediction.
+                display_names = dict(result.names)
+                for display_id, display_name in display_names.items():
+                    if str(display_name).strip().lower() == "other":
+                        display_names[display_id] = "Unclassified road feature"
+                result.names = display_names
+
                 annotated_rgb = result.plot()[:, :, ::-1]
                 original_col, result_col = st.columns(2)
                 with original_col:
@@ -161,7 +171,7 @@ if uploaded_file is not None:
                     score = float(box.conf[0].item())
                     detections.append(
                         {
-                            "Damage type": result.names[class_id],
+                            "Damage type": display_names.get(class_id, result.names[class_id]),
                             "Confidence": f"{score:.1%}",
                         }
                     )
@@ -169,9 +179,10 @@ if uploaded_file is not None:
                 st.caption(f"Model source: {model_source}")
                 if is_public_baseline:
                     st.warning(
-                        "This third-party model has an 'Other' class that may include "
-                        "manholes, patches, oil spills, and road markings. It does not "
-                        "provide a dedicated manhole label."
+                        "The model's broad 'Other' class is displayed as "
+                        "'Unclassified road feature'. It may include manholes, patches, "
+                        "oil spills, or road markings; this label is not a confirmed "
+                        "manhole or a specific damage type."
                     )
                 else:
                     st.caption(
