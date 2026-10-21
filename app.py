@@ -12,7 +12,7 @@ st.set_page_config(
 try:
     import numpy as np
     import torch
-    from PIL import Image
+    from PIL import Image, ImageDraw
     from ultralytics import YOLO
 except Exception as exc:
     print(
@@ -93,6 +93,61 @@ def load_model() -> tuple[YOLO, str, bool]:
     return model, model_source, is_public_baseline
 
 
+# This second-stage model only analyses crops which the detector labeled "Other".
+# These are candidate descriptions, not a new supervised road-damage detector.
+ROAD_FEATURE_CANDIDATES = {
+    "a pothole, a bowl-shaped hole in asphalt pavement": "Pothole",
+    "a longitudinal crack running along an asphalt road": "Longitudinal crack",
+    "a transverse crack running across an asphalt road": "Transverse crack",
+    "interconnected alligator cracking on damaged asphalt": "Alligator crack",
+    "a metal manhole cover embedded in a road": "Manhole cover",
+    "a rectangular road repair patch in asphalt": "Road repair patch",
+    "an oil or fluid stain on asphalt pavement": "Oil or fluid stain",
+    "painted white or yellow road markings": "Road marking",
+    "loose gravel, stones, or debris on a road": "Loose debris or gravel",
+    "standing water or a puddle on a road surface": "Standing water or puddle",
+    "broken or crumbling asphalt pavement": "Broken asphalt",
+    "normal asphalt road surface without a visible defect": "Normal road surface",
+}
+
+
+@st.cache_resource
+def load_visual_classifier():
+    """Load a small zero-shot image classifier only when an Other box exists."""
+    from transformers import pipeline
+
+    return pipeline(
+        task="zero-shot-image-classification",
+        model="wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M",
+        device=0 if torch.cuda.is_available() else -1,
+    )
+
+
+def classify_other_crop(crop: Image.Image):
+    """Return best candidate and relative similarity for a detected Other crop."""
+    classifier = load_visual_classifier()
+    predictions = classifier(
+        crop,
+        candidate_labels=list(ROAD_FEATURE_CANDIDATES.keys()),
+    )
+    if not predictions:
+        return None
+
+    best = predictions[0]
+    candidate = str(best["label"])
+    return {
+        "label": ROAD_FEATURE_CANDIDATES.get(candidate, candidate),
+        "score": float(best["score"]),
+        "alternatives": [
+            {
+                "label": ROAD_FEATURE_CANDIDATES.get(str(item["label"]), str(item["label"])),
+                "score": float(item["score"]),
+            }
+            for item in predictions[:3]
+        ],
+    }
+
+
 st.title("🛣️ RoadGuard AI")
 st.subheader("Deep Learning-Based Road Damage Detection")
 st.write(
@@ -144,57 +199,161 @@ if uploaded_file is not None:
                         verbose=False,
                     )[0]
 
-                # Make the third-party model's broad "Other" category clearer
-                # in both the plotted boxes and the summary. This is a display-only
-                # label change; it does not claim that the object is a manhole or
-                # change the model's underlying prediction.
-                display_names = dict(result.names)
-                if is_public_baseline:
-                    for display_id, display_name in display_names.items():
-                        if str(display_name).strip().lower() == "other":
-                            display_names[display_id] = "Unclassified road feature"
-                result.names = display_names
+                # Build per-detection labels. When the detector returns "Other",
+                # use TinyCLIP on the cropped region to suggest a more specific type.
+                # This is a visual estimate; its relative score is not calibrated
+                # confidence and must not be presented as ground-truth classification.
+                annotated_image = image.copy()
+                draw = ImageDraw.Draw(annotated_image)
+                detections = []
+                secondary_classifier_failed = False
+                other_class_count = 0
 
-                annotated_rgb = result.plot()[:, :, ::-1]
+                image_width, image_height = image.size
+                for box in result.boxes:
+                    class_id = int(box.cls[0].item())
+                    detector_score = float(box.conf[0].item())
+                    detector_class = str(result.names[class_id])
+                    x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+
+                    # Keep crop in-bounds and add context around the detected region.
+                    pad_x = max(6, int((x2 - x1) * 0.12))
+                    pad_y = max(6, int((y2 - y1) * 0.12))
+                    crop_box = (
+                        max(0, x1 - pad_x),
+                        max(0, y1 - pad_y),
+                        min(image_width, x2 + pad_x),
+                        min(image_height, y2 + pad_y),
+                    )
+                    crop = image.crop(crop_box)
+
+                    is_other = detector_class.strip().lower() == "other"
+                    likely_type = detector_class
+                    visual_score = None
+                    top_alternatives = []
+                    if is_other:
+                        other_class_count += 1
+                        try:
+                            classification = classify_other_crop(crop)
+                            if classification:
+                                likely_type = classification["label"]
+                                visual_score = classification["score"]
+                                top_alternatives = classification["alternatives"]
+                            else:
+                                likely_type = "Road feature (type unclear)"
+                                secondary_classifier_failed = True
+                        except Exception as exc:
+                            print(
+                                "Secondary road-feature classification failed: "
+                                f"{type(exc).__name__}: {exc}",
+                                flush=True,
+                            )
+                            likely_type = "Road feature (type unclear)"
+                            secondary_classifier_failed = True
+
+                    if is_other and visual_score is not None:
+                        if visual_score >= 0.22:
+                            display_type = f"Likely {likely_type}"
+                        else:
+                            display_type = f"Possible {likely_type} (weak visual match)"
+                    elif is_other:
+                        display_type = likely_type
+                    else:
+                        display_type = detector_class
+
+                    # Draw a box and per-object text. Using individual labels allows
+                    # different "Other" boxes in the same image to get different guesses.
+                    draw.rectangle((x1, y1, x2, y2), outline=(255, 70, 70), width=3)
+                    detector_text = f"detector {detector_score:.0%}"
+                    if is_other and visual_score is not None:
+                        match_text = f"visual match {visual_score:.0%}"
+                    else:
+                        match_text = ""
+                    annotation = " | ".join(
+                        part for part in (display_type, detector_text, match_text) if part
+                    )
+                    text_bbox = draw.textbbox((x1, max(0, y1 - 20)), annotation)
+                    label_y = max(0, y1 - (text_bbox[3] - text_bbox[1]) - 6)
+                    label_bbox = draw.textbbox((x1 + 3, label_y + 2), annotation)
+                    draw.rectangle(
+                        (
+                            label_bbox[0] - 3,
+                            label_bbox[1] - 2,
+                            label_bbox[2] + 3,
+                            label_bbox[3] + 2,
+                        ),
+                        fill=(25, 25, 25),
+                    )
+                    draw.text((x1 + 3, label_y + 2), annotation, fill=(255, 255, 255))
+
+                    detections.append(
+                        {
+                            "Likely damage / feature": display_type,
+                            "Original detector class": detector_class,
+                            "Detector score": f"{detector_score:.1%}",
+                            "Visual match score": (
+                                f"{visual_score:.1%} (relative, not probability)"
+                                if visual_score is not None
+                                else "Not used"
+                            ),
+                            "_alternatives": top_alternatives,
+                        }
+                    )
+
                 original_col, result_col = st.columns(2)
                 with original_col:
                     st.image(image, caption="Original image", width="stretch")
                 with result_col:
                     st.image(
-                        annotated_rgb,
-                        caption="Road-damage model predictions",
+                        annotated_image,
+                        caption="Road damage detections and likely feature estimates",
                         width="stretch",
                     )
 
-                detections = []
-                for box in result.boxes:
-                    class_id = int(box.cls[0].item())
-                    score = float(box.conf[0].item())
-                    detections.append(
-                        {
-                            "Damage type": display_names.get(class_id, result.names[class_id]),
-                            "Confidence": f"{score:.1%}",
-                        }
-                    )
-
                 st.caption(f"Model source: {model_source}")
-                if is_public_baseline:
-                    st.warning(
-                        "The model's broad 'Other' class is displayed as "
-                        "'Unclassified road feature'. It may include manholes, patches, "
-                        "oil spills, or road markings; this label is not a confirmed "
-                        "manhole or a specific damage type."
+                if other_class_count:
+                    st.info(
+                        "For detections originally labeled 'Other', a second image model "
+                        "suggests a likely feature type from the cropped region. Its visual "
+                        "match score is relative to the candidate list, not a calibrated "
+                        "probability or a verified damage diagnosis."
                     )
-                else:
-                    st.caption(
-                        "Class names are read from the loaded checkpoint. Make sure "
-                        "they match the class labels used in your training dataset."
+                if secondary_classifier_failed:
+                    st.warning(
+                        "The secondary visual classifier could not load or run for at least "
+                        "one region. Those entries are left as 'Road feature (type unclear)' "
+                        "rather than guessing."
                     )
 
                 st.subheader("Detection summary")
                 st.metric("Detected objects", len(detections))
                 if detections:
-                    st.dataframe(detections, width="stretch", hide_index=True)
+                    public_rows = [
+                        {key: value for key, value in row.items() if key != "_alternatives"}
+                        for row in detections
+                    ]
+                    st.dataframe(public_rows, width="stretch", hide_index=True)
+
+                    for idx, row in enumerate(detections, start=1):
+                        alternatives = row.get("_alternatives", [])
+                        if alternatives:
+                            with st.expander(
+                                f"Detection {idx}: other possible visual matches"
+                            ):
+                                st.write(
+                                    "The top candidates from the second-stage image model:"
+                                )
+                                st.dataframe(
+                                    [
+                                        {
+                                            "Candidate": alt["label"],
+                                            "Relative visual match": f'{alt["score"]:.1%}',
+                                        }
+                                        for alt in alternatives
+                                    ],
+                                    width="stretch",
+                                    hide_index=True,
+                                )
                 else:
                     st.warning(
                         "No objects were detected above this threshold. "
