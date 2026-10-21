@@ -104,54 +104,12 @@ st.info(
     "a 'no detections' result does not mean a road is damage-free."
 )
 
-if CUSTOM_MODEL_ENV and not Path(CUSTOM_MODEL_ENV).expanduser().is_file():
-    st.warning(
-        "ROADGUARD_MODEL_PATH points to a missing file. The app will continue by "
-        "checking weights/best.pt and, if needed, load the public real-image model. "
-        "The actual model source will be shown with the results."
-    )
-elif not DEFAULT_MODEL_PATH.is_file() and not CUSTOM_MODEL_ENV and USE_PUBLIC_BASELINE:
-    st.warning(
-        "Your own trained checkpoint was not found. When you click Detect, the app "
-        "will download and use a real third-party road-damage model. This is not "
-        "your custom-trained RoadGuard checkpoint, and its classes/performance differ."
-    )
-elif not DEFAULT_MODEL_PATH.is_file() and not CUSTOM_MODEL_ENV and not USE_PUBLIC_BASELINE:
-    st.warning(
-        "No checkpoint is available. Add weights/best.pt, set ROADGUARD_MODEL_PATH, "
-        "or enable ROADGUARD_USE_PUBLIC_BASELINE=true."
-    )
-
-if st.button("Check model availability"):
-    try:
-        with st.spinner("Checking that the real model can be downloaded and loaded..."):
-            health_model, health_source, health_is_fallback = load_model()
-        st.success("Model loaded successfully. Real inference is ready.")
-        st.write(f"**Model source:** {health_source}")
-        names = getattr(health_model, "names", {})
-        if isinstance(names, dict):
-            class_names = [names[k] for k in sorted(names)]
-        elif isinstance(names, (list, tuple)):
-            class_names = list(names)
-        else:
-            class_names = []
-        if class_names:
-            st.write("**Classes:** " + ", ".join(str(name) for name in class_names))
-        if health_is_fallback:
-            st.info(
-                "This is the public community baseline, not your own trained checkpoint. "
-                "It has no dedicated manhole class."
-            )
-    except Exception as exc:
-        print(
-            "RoadGuard model availability check failed: "
-            f"{type(exc).__name__}: {exc}",
-            flush=True,
-        )
-        st.error(
-            f"Model check failed ({type(exc).__name__}). Check Manage app → Logs. "
-            "No fake prediction was generated."
-        )
+st.caption(
+    "Checkpoint status: the app prefers your trained weights/ best.pt or "
+    "ROADGUARD_MODEL_PATH. If neither is available, it loads a real public "
+    "road-damage checkpoint when you request a model check or run detection. "
+    "The model actually used is reported in the result."
+)
 
 confidence = st.slider(
     "Detection confidence threshold",
