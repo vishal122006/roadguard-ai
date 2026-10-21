@@ -40,21 +40,26 @@ BASELINE_REPO_ID = os.getenv(
     "vinothvikas1987/pothole-detection-yolov8",
 ).strip()
 BASELINE_FILENAME = os.getenv("ROADGUARD_BASELINE_FILENAME", "best.pt").strip()
+# Pin the fallback to a known model revision so an upstream branch update
+# cannot silently change which weights this app downloads.
+BASELINE_REVISION = os.getenv(
+    "ROADGUARD_BASELINE_REVISION",
+    "7286e42df69b1b64a910f341f05b91e14b928e4b",
+).strip()
 
 
-def resolve_checkpoint() -> tuple[str, str]:
-    """Find a real checkpoint; never substitute fabricated detections."""
+def resolve_checkpoint() -> tuple[str, str, bool]:
+    """Resolve a real checkpoint and identify whether it is the public fallback."""
     if CUSTOM_MODEL_ENV:
         custom_path = Path(CUSTOM_MODEL_ENV).expanduser()
         if not custom_path.is_file():
             raise FileNotFoundError(
-                "ROADGUARD_MODEL_PATH is set, but the checkpoint does not exist: "
-                f"{custom_path}"
+                "ROADGUARD_MODEL_PATH is set, but the checkpoint file does not exist."
             )
-        return str(custom_path), "Custom RoadGuard checkpoint (ROADGUARD_MODEL_PATH)"
+        return str(custom_path), "Custom RoadGuard checkpoint", False
 
     if DEFAULT_MODEL_PATH.is_file():
-        return str(DEFAULT_MODEL_PATH), "Project checkpoint (weights/best.pt)"
+        return str(DEFAULT_MODEL_PATH), "Project checkpoint (weights/best.pt)", False
 
     if not USE_PUBLIC_BASELINE:
         raise FileNotFoundError(
@@ -62,24 +67,27 @@ def resolve_checkpoint() -> tuple[str, str]:
             "Add weights/best.pt or set ROADGUARD_MODEL_PATH."
         )
 
-    # Public community baseline trained on real road-damage data. This is a
-    # fallback only; it is not represented as the project's own trained model.
+    # This is a real, publicly hosted road-damage model, not the user's
+    # custom-trained checkpoint. It is used only if no local checkpoint exists.
     from huggingface_hub import hf_hub_download
 
     checkpoint_path = hf_hub_download(
         repo_id=BASELINE_REPO_ID,
         filename=BASELINE_FILENAME,
+        revision=BASELINE_REVISION or None,
     )
     return (
         checkpoint_path,
-        f"Public community baseline: {BASELINE_REPO_ID}/{BASELINE_FILENAME}",
+        f"Public community baseline ({BASELINE_REPO_ID}, revision {BASELINE_REVISION[:7]})",
+        True,
     )
 
 
 @st.cache_resource
-def load_model() -> tuple[YOLO, str]:
-    checkpoint_path, model_source = resolve_checkpoint()
-    return YOLO(checkpoint_path), model_source
+def load_model() -> tuple[YOLO, str, bool]:
+    checkpoint_path, model_source, is_public_baseline = resolve_checkpoint()
+    model = YOLO(checkpoint_path)
+    return model, model_source, is_public_baseline
 
 
 st.title("🛣️ RoadGuard AI")
@@ -95,14 +103,14 @@ st.info(
 
 if CUSTOM_MODEL_ENV and not Path(CUSTOM_MODEL_ENV).expanduser().is_file():
     st.error(
-        "ROADGUARD_MODEL_PATH points to a missing file. Correct that setting or "
-        "remove it to allow the public baseline fallback."
+        "ROADGUARD_MODEL_PATH is set but does not point to an existing checkpoint. "
+        "Correct or remove that setting to use the public fallback."
     )
 elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and USE_PUBLIC_BASELINE:
     st.warning(
-        "Your own trained checkpoint was not found. The app will use a real, "
-        "publicly hosted road-damage baseline instead. Its labels and performance "
-        "may differ from your custom RoadGuard model. It is not a synthetic/demo model."
+        "Your own trained checkpoint was not found. When you click Detect, the app "
+        "will download and use a real third-party road-damage model. This is not "
+        "your custom-trained RoadGuard checkpoint, and its classes/performance differ."
     )
 elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and not USE_PUBLIC_BASELINE:
     st.warning(
@@ -130,8 +138,10 @@ if uploaded_file is not None:
 
         if st.button("Detect road damage", type="primary"):
             try:
-                with st.spinner("Loading the checkpoint and analyzing image..."):
-                    model, model_source = load_model()
+                with st.spinner(
+                    "Loading the real model checkpoint and analyzing the image..."
+                ):
+                    model, model_source, is_public_baseline = load_model()
                     device = 0 if torch.cuda.is_available() else "cpu"
                     result = model.predict(
                         source=np.asarray(image),
@@ -164,12 +174,18 @@ if uploaded_file is not None:
                     )
 
                 st.caption(f"Model source: {model_source}")
-                st.caption(
-                    "Class names come from the loaded checkpoint. The public baseline "
-                    "uses road-damage categories including longitudinal/transverse/"
-                    "alligator cracks, potholes, and an 'Other' category; 'Other' is "
-                    "not a dedicated manhole label."
-                )
+                if is_public_baseline:
+                    st.warning(
+                        "This third-party model has an 'Other' class that may include "
+                        "manholes, patches, oil spills, and road markings. It does not "
+                        "provide a dedicated manhole label."
+                    )
+                else:
+                    st.caption(
+                        "Class names are read from the loaded checkpoint. Make sure "
+                        "they match the class labels used in your training dataset."
+                    )
+
                 st.subheader("Detection summary")
                 st.metric("Detected objects", len(detections))
                 if detections:
@@ -186,15 +202,22 @@ if uploaded_file is not None:
                     flush=True,
                 )
                 st.error(
-                    "Model loading or inference failed. Check Manage app → Logs for "
-                    "the detailed error. No fallback or synthetic predictions were substituted."
+                    "Could not load or run the real detection model. "
+                    f"Error type: {type(exc).__name__}. "
+                    "Check Manage app → Logs for the detailed error. "
+                    "No fallback or synthetic predictions were substituted."
                 )
+                if isinstance(exc, (ConnectionError, TimeoutError)):
+                    st.info(
+                        "The model download may have failed. Check that the app can "
+                        "reach Hugging Face, then reboot the app and try again."
+                    )
     except Exception as exc:
-        st.error(f"Could not read the uploaded image: {exc}")
+        st.error(f"Could not read the uploaded image: {type(exc).__name__}.")
 
 st.caption(
     "RoadGuard AI is an academic prototype and should not be used as the sole "
-    "basis for road-safety or maintenance decisions. The public fallback model is "
-    "provided by vinothvikas1987 on Hugging Face under its published Apache-2.0 license; "
-    "review the model card and dataset terms before further redistribution or commercial use."
+    "basis for road-safety or maintenance decisions. The public fallback is "
+    "published by vinothvikas1987 on Hugging Face under Apache-2.0; review the "
+    "upstream model card and dataset terms before redistribution or commercial use."
 )
