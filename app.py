@@ -215,9 +215,12 @@ if uploaded_file is not None:
                 ):
                     model, model_source, is_public_baseline = load_model()
                     device = 0 if torch.cuda.is_available() else "cpu"
+                    # Use a larger detector input to retain more small-crack detail.
+                    # The original uploaded pixels are passed through; no aspect-ratio
+                    # distortion or synthetic super-resolution is applied.
                     result = model.predict(
                         source=np.asarray(image),
-                        imgsz=640,
+                        imgsz=960,
                         conf=confidence,
                         device=device,
                         verbose=False,
@@ -227,17 +230,29 @@ if uploaded_file is not None:
                 # use TinyCLIP on the cropped region to suggest a more specific type.
                 # This is a visual estimate; its relative score is not calibrated
                 # confidence and must not be presented as ground-truth classification.
-                # Create an annotation canvas sized for screen viewing. This canvas
-                # is only for display; all detection and crop classification use the
-                # original image dimensions and unmodified pixels.
+                # Put both comparison images on the same standard 1280×720 canvas.
+                # Keep the source aspect ratio (letterbox instead of stretching) and use
+                # high-quality LANCZOS resampling for display. Resizing does not create
+                # details absent from a low-resolution upload, so we still warn on tiny files.
                 image_width, image_height = image.size
-                display_width = max(800, min(image_width, 1400))
-                display_scale = display_width / max(1, image_width)
-                display_height = max(1, int(round(image_height * display_scale)))
-                annotated_image = image.resize(
-                    (display_width, display_height),
+                canvas_width, canvas_height = 1280, 720
+                display_scale = min(
+                    canvas_width / max(1, image_width),
+                    canvas_height / max(1, image_height),
+                )
+                resized_width = max(1, int(round(image_width * display_scale)))
+                resized_height = max(1, int(round(image_height * display_scale)))
+                offset_x = (canvas_width - resized_width) // 2
+                offset_y = (canvas_height - resized_height) // 2
+                display_image = image.resize(
+                    (resized_width, resized_height),
                     resample=Image.Resampling.LANCZOS,
                 )
+                input_canvas = Image.new(
+                    "RGB", (canvas_width, canvas_height), color=(18, 18, 18)
+                )
+                input_canvas.paste(display_image, (offset_x, offset_y))
+                annotated_image = input_canvas.copy()
                 draw = ImageDraw.Draw(annotated_image)
                 try:
                     from PIL import ImageFont
@@ -304,10 +319,10 @@ if uploaded_file is not None:
 
                     # Scale detector coordinates to the screen-friendly annotation canvas.
                     # Keep the label concise so it remains readable and doesn't run off-edge.
-                    sx1 = int(round(x1 * display_scale))
-                    sy1 = int(round(y1 * display_scale))
-                    sx2 = int(round(x2 * display_scale))
-                    sy2 = int(round(y2 * display_scale))
+                    sx1 = int(round(x1 * display_scale)) + offset_x
+                    sy1 = int(round(y1 * display_scale)) + offset_y
+                    sx2 = int(round(x2 * display_scale)) + offset_x
+                    sy2 = int(round(y2 * display_scale)) + offset_y
                     line_width = max(3, int(round(3 * display_scale)))
                     draw.rectangle(
                         (sx1, sy1, sx2, sy2),
@@ -370,24 +385,39 @@ if uploaded_file is not None:
                         }
                     )
 
-                st.subheader("Original image")
-                st.image(
-                    image,
-                    caption=f"Original upload ({image.width} × {image.height}px)",
-                    width="stretch",
-                )
-                st.download_button(
-                    "Download original",
-                    data=uploaded_file.getvalue(),
-                    file_name=uploaded_file.name,
-                    mime=uploaded_file.type or "image/jpeg",
-                    key="download_original_result",
-                )
-                st.subheader("Road damage detection output")
-                st.image(
-                    annotated_image,
-                    caption="Full-width detection output. The display canvas is resized for readability; inference uses the original image.",
-                    width="stretch",
+                st.subheader("Input vs. detection output")
+                input_col, output_col = st.columns(2, gap="medium")
+                with input_col:
+                    st.markdown("**Original input**")
+                    st.image(
+                        input_canvas,
+                        caption=(
+                            f"Source: {image.width} × {image.height}px · "
+                            "fit to 1280 × 720 without stretching"
+                        ),
+                        width="stretch",
+                    )
+                    st.download_button(
+                        "Download original",
+                        data=uploaded_file.getvalue(),
+                        file_name=uploaded_file.name,
+                        mime=uploaded_file.type or "image/jpeg",
+                        key="download_original_result",
+                    )
+                with output_col:
+                    st.markdown("**Model output**")
+                    st.image(
+                        annotated_image,
+                        caption=(
+                            "Same 1280 × 720 comparison canvas with predicted boxes. "
+                            "Original aspect ratio is preserved."
+                        ),
+                        width="stretch",
+                    )
+                st.caption(
+                    "Both views use the same standard canvas for direct comparison. "
+                    "Letterboxing preserves shape and avoids stretching. Upscaling can "
+                    "make a preview larger, but cannot restore missing source detail."
                 )
 
                 st.caption(f"Model source: {model_source}")
