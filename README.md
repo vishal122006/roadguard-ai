@@ -10,6 +10,8 @@
 - Shows class names and confidence scores from the actual loaded checkpoint.
 - Uses the project's own fine-tuned checkpoint when it is installed at `weights/best.pt` or configured through `ROADGUARD_MODEL_PATH`.
 - If the project checkpoint is missing, uses a publicly hosted road-damage baseline from [vinothvikas1987/pothole-detection-yolov8](https://huggingface.co/vinothvikas1987/pothole-detection-yolov8) so real model inference can still run.
+- For detections labeled `Other`, optionally applies a second-stage TinyCLIP zero-shot classifier to the cropped image region and suggests the closest visual category (pothole, crack, manhole cover, patch, oil/fluid stain, road marking, debris, water, broken asphalt, or normal road surface).
+- Shows the detector's original class and score separately from the second-stage visual match score. The visual match score is relative to the candidate list, not a calibrated probability. This is a general zero-shot estimate, not a replacement for training and validating a dedicated classifier on correctly labeled road-damage crops.
 - No synthetic or fabricated detection results are generated.
 
 ## Checkpoint behavior
@@ -82,3 +84,10 @@ python evaluate.py --model /path/to/best.pt --data /path/to/data.yaml --split te
 - Training/inference framework: [Ultralytics](https://github.com/ultralytics/ultralytics).
 
 This is an academic prototype. For academic submission, document the exact model used for each result, cite upstream work, and follow your institution's AI-assistance policy.
+
+
+## Second-stage classification of `Other` detections
+
+When the public detector predicts `Other`, the app crops that region and runs [TinyCLIP ViT-8M](https://huggingface.co/wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M) over a fixed set of candidate road-surface descriptions. It displays the highest-matching candidate as `Likely ...` or `Possible ... (weak visual match)`, along with the detector score and relative visual match score. The top alternatives are available in an expander.
+
+TinyCLIP is a zero-shot vision-language classifier; its scores are relative across the supplied labels and are **not calibrated probabilities**. It may confuse visually similar categories. If it cannot load, the app explicitly reports that the type could not be estimated rather than fabricating a class. For robust domain accuracy, collect representative real crops with verified labels and train/evaluate a dedicated classification model.
