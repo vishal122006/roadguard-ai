@@ -236,6 +236,9 @@ if uploaded_file is not None:
                 # details absent from a low-resolution upload, so we still warn on tiny files.
                 image_width, image_height = image.size
                 canvas_width, canvas_height = 1280, 720
+                # Keep the annotation-coordinate bounds aligned to this output canvas.
+                # These aliases are used below when clipping label text to image edges.
+                display_width, display_height = canvas_width, canvas_height
                 display_scale = min(
                     canvas_width / max(1, image_width),
                     canvas_height / max(1, image_height),
