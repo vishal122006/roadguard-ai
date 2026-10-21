@@ -187,13 +187,19 @@ if uploaded_file is not None:
         preview_width = min(image.width, 1000)
         st.caption(
             f"Source image: {image.width} × {image.height} pixels. "
-            "The preview is capped at its native width (up to 1000 px); "
-            "model inference uses the original uploaded image."
+            "Detection runs on the original uploaded pixels."
         )
+        if image.width < 640 or image.height < 480:
+            st.warning(
+                "This upload is very small for road-damage analysis. "
+                f"It is only {image.width} × {image.height} pixels, so fine cracks and "
+                "small defects may be impossible to identify reliably. Upload the "
+                "original camera photo or full-resolution image—not a thumbnail or screenshot."
+            )
         st.image(
             image,
             caption="Uploaded road photograph",
-            width=preview_width,
+            width="stretch",
         )
         st.download_button(
             "Download original image",
@@ -221,13 +227,30 @@ if uploaded_file is not None:
                 # use TinyCLIP on the cropped region to suggest a more specific type.
                 # This is a visual estimate; its relative score is not calibrated
                 # confidence and must not be presented as ground-truth classification.
-                annotated_image = image.copy()
+                # Create an annotation canvas sized for screen viewing. This canvas
+                # is only for display; all detection and crop classification use the
+                # original image dimensions and unmodified pixels.
+                image_width, image_height = image.size
+                display_width = max(800, min(image_width, 1400))
+                display_scale = display_width / max(1, image_width)
+                display_height = max(1, int(round(image_height * display_scale)))
+                annotated_image = image.resize(
+                    (display_width, display_height),
+                    resample=Image.Resampling.LANCZOS,
+                )
                 draw = ImageDraw.Draw(annotated_image)
+                try:
+                    from PIL import ImageFont
+                    label_font = ImageFont.truetype(
+                        "DejaVuSans.ttf",
+                        size=max(14, min(24, int(18 * display_scale))),
+                    )
+                except Exception:
+                    label_font = ImageFont.load_default()
+
                 detections = []
                 secondary_classifier_failed = False
                 other_class_count = 0
-
-                image_width, image_height = image.size
                 for box in result.boxes:
                     class_id = int(box.cls[0].item())
                     detector_score = float(box.conf[0].item())
@@ -279,30 +302,59 @@ if uploaded_file is not None:
                     else:
                         display_type = detector_class
 
-                    # Draw a box and per-object text. Using individual labels allows
-                    # different "Other" boxes in the same image to get different guesses.
-                    draw.rectangle((x1, y1, x2, y2), outline=(255, 70, 70), width=3)
-                    detector_text = f"detector {detector_score:.0%}"
-                    if is_other and visual_score is not None:
-                        match_text = f"visual match {visual_score:.0%}"
-                    else:
-                        match_text = ""
-                    annotation = " | ".join(
-                        part for part in (display_type, detector_text, match_text) if part
+                    # Scale detector coordinates to the screen-friendly annotation canvas.
+                    # Keep the label concise so it remains readable and doesn't run off-edge.
+                    sx1 = int(round(x1 * display_scale))
+                    sy1 = int(round(y1 * display_scale))
+                    sx2 = int(round(x2 * display_scale))
+                    sy2 = int(round(y2 * display_scale))
+                    line_width = max(3, int(round(3 * display_scale)))
+                    draw.rectangle(
+                        (sx1, sy1, sx2, sy2),
+                        outline=(255, 70, 70),
+                        width=line_width,
                     )
-                    text_bbox = draw.textbbox((x1, max(0, y1 - 20)), annotation)
-                    label_y = max(0, y1 - (text_bbox[3] - text_bbox[1]) - 6)
-                    label_bbox = draw.textbbox((x1 + 3, label_y + 2), annotation)
+                    short_type = likely_type
+                    if is_other and visual_score is not None:
+                        if visual_score < 0.22:
+                            short_type = f"Possible {likely_type}"
+                        else:
+                            short_type = f"Likely {likely_type}"
+                    annotation = f"{short_type} · {detector_score:.0%}"
+                    if is_other and visual_score is not None:
+                        annotation += f" · match {visual_score:.0%}"
+
+                    pad = 5
+                    label_bbox = draw.textbbox((0, 0), annotation, font=label_font)
+                    text_w = label_bbox[2] - label_bbox[0]
+                    text_h = label_bbox[3] - label_bbox[1]
+                    # If the label is wider than the canvas, fall back to a short class.
+                    if text_w > display_width - 2 * pad:
+                        annotation = f"{short_type[:26]} · {detector_score:.0%}"
+                        label_bbox = draw.textbbox((0, 0), annotation, font=label_font)
+                        text_w = label_bbox[2] - label_bbox[0]
+                        text_h = label_bbox[3] - label_bbox[1]
+
+                    text_x = min(max(0, sx1), max(0, display_width - text_w - 2 * pad))
+                    above_y = sy1 - text_h - 2 * pad
+                    text_y = above_y if above_y >= 0 else min(
+                        max(0, sy1 + 2), max(0, display_height - text_h - 2 * pad)
+                    )
                     draw.rectangle(
                         (
-                            label_bbox[0] - 3,
-                            label_bbox[1] - 2,
-                            label_bbox[2] + 3,
-                            label_bbox[3] + 2,
+                            text_x,
+                            text_y,
+                            min(display_width - 1, text_x + text_w + 2 * pad),
+                            min(display_height - 1, text_y + text_h + 2 * pad),
                         ),
                         fill=(25, 25, 25),
                     )
-                    draw.text((x1 + 3, label_y + 2), annotation, fill=(255, 255, 255))
+                    draw.text(
+                        (text_x + pad, text_y + pad),
+                        annotation,
+                        fill=(255, 255, 255),
+                        font=label_font,
+                    )
 
                     detections.append(
                         {
@@ -318,29 +370,25 @@ if uploaded_file is not None:
                         }
                     )
 
-                original_col, result_col = st.columns(2)
-                # Column previews use a fixed maximum width and never upscale
-                # images smaller than that width. No resizing is applied to inference.
-                result_preview_width = min(image.width, 700)
-                with original_col:
-                    st.image(
-                        image,
-                        caption=f"Original image ({image.width} × {image.height}px)",
-                        width=result_preview_width,
-                    )
-                    st.download_button(
-                        "Download original",
-                        data=uploaded_file.getvalue(),
-                        file_name=uploaded_file.name,
-                        mime=uploaded_file.type or "image/jpeg",
-                        key="download_original_result",
-                    )
-                with result_col:
-                    st.image(
-                        annotated_image,
-                        caption="Road damage detections and likely feature estimates",
-                        width=result_preview_width,
-                    )
+                st.subheader("Original image")
+                st.image(
+                    image,
+                    caption=f"Original upload ({image.width} × {image.height}px)",
+                    width="stretch",
+                )
+                st.download_button(
+                    "Download original",
+                    data=uploaded_file.getvalue(),
+                    file_name=uploaded_file.name,
+                    mime=uploaded_file.type or "image/jpeg",
+                    key="download_original_result",
+                )
+                st.subheader("Road damage detection output")
+                st.image(
+                    annotated_image,
+                    caption="Full-width detection output. The display canvas is resized for readability; inference uses the original image.",
+                    width="stretch",
+                )
 
                 st.caption(f"Model source: {model_source}")
                 if other_class_count:
