@@ -149,9 +149,10 @@ if uploaded_file is not None:
                 # label change; it does not claim that the object is a manhole or
                 # change the model's underlying prediction.
                 display_names = dict(result.names)
-                for display_id, display_name in display_names.items():
-                    if str(display_name).strip().lower() == "other":
-                        display_names[display_id] = "Unclassified road feature"
+                if is_public_baseline:
+                    for display_id, display_name in display_names.items():
+                        if str(display_name).strip().lower() == "other":
+                            display_names[display_id] = "Unclassified road feature"
                 result.names = display_names
 
                 annotated_rgb = result.plot()[:, :, ::-1]
