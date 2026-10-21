@@ -52,19 +52,22 @@ def resolve_checkpoint() -> tuple[str, str, bool]:
     """Resolve a real checkpoint and identify whether it is the public fallback."""
     if CUSTOM_MODEL_ENV:
         custom_path = Path(CUSTOM_MODEL_ENV).expanduser()
-        if not custom_path.is_file():
-            raise FileNotFoundError(
-                "ROADGUARD_MODEL_PATH is set, but the checkpoint file does not exist."
-            )
-        return str(custom_path), "Custom RoadGuard checkpoint", False
+        if custom_path.is_file():
+            return str(custom_path), "Custom RoadGuard checkpoint", False
+        print(
+            "ROADGUARD_MODEL_PATH points to a missing checkpoint; "
+            "trying the project checkpoint and public baseline.",
+            flush=True,
+        )
 
     if DEFAULT_MODEL_PATH.is_file():
         return str(DEFAULT_MODEL_PATH), "Project checkpoint (weights/best.pt)", False
 
     if not USE_PUBLIC_BASELINE:
         raise FileNotFoundError(
-            "No local checkpoint was found and the public baseline is disabled. "
-            "Add weights/best.pt or set ROADGUARD_MODEL_PATH."
+            "No usable local checkpoint was found and the public baseline is disabled. "
+            "Add weights/best.pt, correct ROADGUARD_MODEL_PATH, or enable "
+            "ROADGUARD_USE_PUBLIC_BASELINE=true."
         )
 
     # This is a real, publicly hosted road-damage model, not the user's
@@ -102,17 +105,18 @@ st.info(
 )
 
 if CUSTOM_MODEL_ENV and not Path(CUSTOM_MODEL_ENV).expanduser().is_file():
-    st.error(
-        "ROADGUARD_MODEL_PATH is set but does not point to an existing checkpoint. "
-        "Correct or remove that setting to use the public fallback."
+    st.warning(
+        "ROADGUARD_MODEL_PATH points to a missing file. The app will continue by "
+        "checking weights/best.pt and, if needed, load the public real-image model. "
+        "The actual model source will be shown with the results."
     )
-elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and USE_PUBLIC_BASELINE:
+elif not DEFAULT_MODEL_PATH.is_file() and not CUSTOM_MODEL_ENV and USE_PUBLIC_BASELINE:
     st.warning(
         "Your own trained checkpoint was not found. When you click Detect, the app "
         "will download and use a real third-party road-damage model. This is not "
         "your custom-trained RoadGuard checkpoint, and its classes/performance differ."
     )
-elif not CUSTOM_MODEL_ENV and not DEFAULT_MODEL_PATH.is_file() and not USE_PUBLIC_BASELINE:
+elif not DEFAULT_MODEL_PATH.is_file() and not CUSTOM_MODEL_ENV and not USE_PUBLIC_BASELINE:
     st.warning(
         "No checkpoint is available. Add weights/best.pt, set ROADGUARD_MODEL_PATH, "
         "or enable ROADGUARD_USE_PUBLIC_BASELINE=true."
