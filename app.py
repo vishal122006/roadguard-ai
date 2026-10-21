@@ -182,7 +182,25 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Uploaded road photograph", width="stretch")
+        # Preserve the original PIL image for inference. Only cap the UI preview
+        # width so a small upload is not stretched across a very wide browser.
+        preview_width = min(image.width, 1000)
+        st.caption(
+            f"Source image: {image.width} × {image.height} pixels. "
+            "The preview is capped at its native width (up to 1000 px); "
+            "model inference uses the original uploaded image."
+        )
+        st.image(
+            image,
+            caption="Uploaded road photograph",
+            width=preview_width,
+        )
+        st.download_button(
+            "Download original image",
+            data=uploaded_file.getvalue(),
+            file_name=uploaded_file.name,
+            mime=uploaded_file.type or "image/jpeg",
+        )
 
         if st.button("Detect road damage", type="primary"):
             try:
@@ -301,13 +319,27 @@ if uploaded_file is not None:
                     )
 
                 original_col, result_col = st.columns(2)
+                # Column previews use a fixed maximum width and never upscale
+                # images smaller than that width. No resizing is applied to inference.
+                result_preview_width = min(image.width, 700)
                 with original_col:
-                    st.image(image, caption="Original image", width="stretch")
+                    st.image(
+                        image,
+                        caption=f"Original image ({image.width} × {image.height}px)",
+                        width=result_preview_width,
+                    )
+                    st.download_button(
+                        "Download original",
+                        data=uploaded_file.getvalue(),
+                        file_name=uploaded_file.name,
+                        mime=uploaded_file.type or "image/jpeg",
+                        key="download_original_result",
+                    )
                 with result_col:
                     st.image(
                         annotated_image,
                         caption="Road damage detections and likely feature estimates",
-                        width="stretch",
+                        width=result_preview_width,
                     )
 
                 st.caption(f"Model source: {model_source}")
