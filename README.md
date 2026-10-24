@@ -91,3 +91,8 @@ This is an academic prototype. For academic submission, document the exact model
 When the public detector predicts `Other`, the app crops that region and runs [TinyCLIP ViT-8M](https://huggingface.co/wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M) over a fixed set of candidate road-surface descriptions. It displays the highest-matching candidate as `Likely ...` or `Possible ... (weak visual match)`, along with the detector score and relative visual match score. The top alternatives are available in an expander.
 
 TinyCLIP is a zero-shot vision-language classifier; its scores are relative across the supplied labels and are **not calibrated probabilities**. It may confuse visually similar categories. If it cannot load, the app explicitly reports that the type could not be estimated rather than fabricating a class. For robust domain accuracy, collect representative real crops with verified labels and train/evaluate a dedicated classification model.
+
+
+## Swin Transformer research experiment
+
+The RDD2022 Swin Transformer Tiny + FPN + Faster R-CNN experiment, including measured evaluation results and limitations, is documented in [the experiment report](experiments/roadguard-swin-transformer/README.md). It remains a separate research path; the existing YOLO Streamlit deployment is unchanged.
