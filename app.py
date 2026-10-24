@@ -1,4 +1,6 @@
 from pathlib import Path
+import csv
+import json
 import os
 
 import streamlit as st
@@ -8,6 +10,45 @@ st.set_page_config(
     page_icon="🛣️",
     layout="wide",
 )
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+:root{--rg-bg:#0a0e0d;--rg-panel:#111815;--rg-panel2:#151e18;--rg-line:#29372e;--rg-text:#f1f5ef;--rg-muted:#9ba99f;--rg-lime:#c7f36b;--rg-teal:#66d9e8;--rg-orange:#ffb86b;--rg-red:#ff7188}
+html,body,[class*="css"]{font-family:'Manrope',system-ui,sans-serif}
+.stApp{background:radial-gradient(ellipse at 84% 0%,rgba(199,243,107,.07),transparent 28%),var(--rg-bg);color:var(--rg-text)}
+[data-testid="stAppViewContainer"]{background:transparent}
+[data-testid="stHeader"]{background:rgba(10,14,13,.7)}
+.block-container{max-width:1500px;padding-top:1.7rem;padding-bottom:3rem}
+section[data-testid="stSidebar"]{background:#0d1310;border-right:1px solid var(--rg-line)}
+section[data-testid="stSidebar"] *{color:var(--rg-text)}
+h1,h2,h3,h4{color:var(--rg-text)!important;letter-spacing:-.045em!important}
+p,label,[data-testid="stMarkdownContainer"]{color:var(--rg-text)}
+[data-testid="stMarkdownContainer"] a{color:var(--rg-lime)}
+[data-testid="stFileUploaderDropzone"]{background:#101714;border:1px dashed #536b54;border-radius:16px}
+[data-testid="stFileUploaderDropzone"]:hover{border-color:var(--rg-lime);background:#151e17}
+.stButton>button,.stDownloadButton>button{background:var(--rg-lime);color:#10170d;border:0;font-weight:800;border-radius:10px;min-height:2.75rem;transition:transform .15s ease,filter .15s ease}
+.stButton>button:hover,.stDownloadButton>button:hover{color:#10170d;filter:brightness(1.06);transform:translateY(-1px);border:0}
+.stSlider [role="slider"]{background:var(--rg-lime);border-color:var(--rg-lime)}
+[data-testid="stMetric"]{background:linear-gradient(145deg,#151e18,#101512);border:1px solid var(--rg-line);border-radius:15px;padding:15px 17px}
+[data-testid="stMetricLabel"]{color:var(--rg-muted)!important;font-size:.72rem!important;text-transform:uppercase;letter-spacing:.09em}
+[data-testid="stMetricValue"]{color:var(--rg-text)!important;font-weight:800;letter-spacing:-.05em}
+[data-testid="stDataFrame"]{border:1px solid var(--rg-line);border-radius:12px;overflow:hidden}
+[data-testid="stExpander"]{border:1px solid var(--rg-line);background:#101613;border-radius:12px}
+hr{border-color:var(--rg-line)!important}
+.rg-hero{position:relative;overflow:hidden;border:1px solid #304033;border-radius:24px;padding:30px 32px 27px;background:linear-gradient(112deg,rgba(199,243,107,.085),transparent 47%),linear-gradient(145deg,#151e18,#101513 75%);margin-bottom:22px}
+.rg-hero:after{content:'RG / 04';position:absolute;right:25px;bottom:4px;font:500 clamp(3.5rem,8vw,8rem) 'DM Mono',monospace;letter-spacing:-.12em;color:rgba(199,243,107,.05);pointer-events:none}
+.rg-eyebrow{font:500 .68rem 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.17em;color:var(--rg-lime)}
+.rg-hero h1{font-size:clamp(2.2rem,5vw,4.4rem);line-height:.98;margin:.7rem 0 .8rem;max-width:900px;font-weight:800}
+.rg-hero p{color:#a8b5ab;max-width:790px;line-height:1.65;margin:0;font-size:.96rem}
+.rg-chip{display:inline-flex;align-items:center;gap:8px;border:1px solid #465c3c;background:#182219;color:var(--rg-lime);border-radius:999px;padding:7px 11px;font:500 .66rem 'DM Mono',monospace;letter-spacing:.08em;text-transform:uppercase}
+.rg-dot{width:7px;height:7px;border-radius:50%;background:var(--rg-lime);display:inline-block;box-shadow:0 0 12px #c7f36b80}
+.rg-section{font:500 .68rem 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.15em;color:var(--rg-lime);margin:.5rem 0}
+.rg-note{border:1px solid #54442d;border-radius:12px;padding:12px 15px;background:#1c1913;color:#f3d8a9;line-height:1.55;font-size:.82rem}
+.rg-footer{border-top:1px solid var(--rg-line);margin-top:30px;padding-top:14px;color:#78857b;font:500 .64rem 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.1em}
+@media(max-width:800px){.rg-hero{padding:23px 20px}.rg-hero:after{display:none}}
+</style>
+""", unsafe_allow_html=True)
 
 try:
     import numpy as np
@@ -148,23 +189,106 @@ def classify_other_crop(crop: Image.Image):
     }
 
 
-st.title("🛣️ RoadGuard AI")
-st.subheader("Deep Learning-Based Road Damage Detection")
-st.write(
-    "Upload a real road photograph to detect visible road damage. "
-    "The app displays model-produced bounding boxes, class names, and confidence scores."
-)
-st.info(
-    "Research prototype only. Detections can be missed or incorrect; "
-    "a 'no detections' result does not mean a road is damage-free."
-)
+st.markdown("""
+<div class="rg-hero">
+  <div class="rg-chip"><span class="rg-dot"></span> Road intelligence console · Computer vision</div>
+  <h1>See the damage.<br>Measure the road.</h1>
+  <p>RoadGuard AI turns real road photographs into inspectable damage detections, confidence scores and exportable evidence. Built for research workflows—not black-box claims.</p>
+</div>
+""", unsafe_allow_html=True)
 
-st.caption(
-    "Checkpoint status: the app prefers your trained weights/ best.pt or "
-    "ROADGUARD_MODEL_PATH. If neither is available, it loads a real public "
-    "road-damage checkpoint when you request a model check or run detection. "
-    "The model actually used is reported in the result."
-)
+header_left, header_right = st.columns([1.5, 1], gap="large")
+with header_left:
+    st.markdown('<div class="rg-section">01 / Inspection workspace</div>', unsafe_allow_html=True)
+    st.markdown("### Road damage, made visible")
+    st.write("Upload a full-resolution road photograph. Inspect model-produced boxes side-by-side with the original, review confidence scores and export the detections.")
+with header_right:
+    st.markdown('<div class="rg-section">System notes</div>', unsafe_allow_html=True)
+    st.markdown('<div class="rg-note"><b>Research prototype</b><br>False positives and missed damage are possible. A no-detection result does not prove that a road is damage-free.</div>', unsafe_allow_html=True)
+    st.caption("The active checkpoint is identified in each result. Public baseline and project-trained weights are not interchangeable.")
+
+
+def _load_evaluation_metrics():
+    """Load real dataset-level metrics from an evaluation JSON or Ultralytics results.csv."""
+    explicit = os.getenv("ROADGUARD_EVAL_REPORT", "").strip()
+    candidates = [Path(explicit)] if explicit else []
+    candidates += [
+        APP_DIR / "evaluation_metrics.json",
+        APP_DIR / "metrics.json",
+        APP_DIR / "results" / "evaluation_metrics.json",
+        APP_DIR / "results" / "metrics.json",
+        APP_DIR / "outputs" / "test_metrics.json",
+    ]
+    for path in candidates:
+        if not path or not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for nested_key in ("metrics", "results", "test_metrics", "box"):
+                    if isinstance(data.get(nested_key), dict):
+                        data = {**data, **data[nested_key]}
+                return data, str(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+    csv_paths = []
+    for pattern in ("runs/detect/**/results.csv", "runs/**/results.csv", "results.csv"):
+        csv_paths.extend(APP_DIR.glob(pattern))
+    csv_paths = [p for p in set(csv_paths) if p.is_file()]
+    for path in sorted(csv_paths, key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            if rows:
+                return rows[-1], str(path)
+        except (OSError, csv.Error):
+            continue
+    return {}, None
+
+
+def _metric_value(data, candidates):
+    normalized = {str(k).strip().lower().replace(" ", "").replace("_", "").replace("-", ""): v for k, v in data.items()}
+    for candidate in candidates:
+        key = candidate.lower().replace(" ", "").replace("_", "").replace("-", "")
+        if key not in normalized:
+            continue
+        try:
+            value = float(normalized[key])
+            if value == value and abs(value) != float("inf"):
+                return value * 100 if abs(value) <= 1 else value
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _show_metric(value):
+    return f"{value:.2f}%" if value is not None else "Not recorded"
+
+
+st.markdown('<div class="rg-section">02 / Evaluation scorecard</div>', unsafe_allow_html=True)
+_eval_data, _eval_source = _load_evaluation_metrics()
+_p = _metric_value(_eval_data, ["metrics/precision(B)", "precision", "box_precision", "P"])
+_r = _metric_value(_eval_data, ["metrics/recall(B)", "recall", "box_recall", "R"])
+_map50 = _metric_value(_eval_data, ["metrics/mAP50(B)", "mAP50", "map50", "AP50"])
+_map5095 = _metric_value(_eval_data, ["metrics/mAP50-95(B)", "mAP50-95", "map50-95", "AP"])
+_f1 = (2 * _p * _r / (_p + _r)) if _p is not None and _r is not None and (_p + _r) else None
+score_cols = st.columns(5, gap="small")
+for col, label, value, help_text in [
+    (score_cols[0], "Precision", _p, "Of predicted detections, the share that are correct under the evaluation protocol."),
+    (score_cols[1], "Recall", _r, "Of annotated objects, the share successfully detected."),
+    (score_cols[2], "F1 score", _f1, "Harmonic mean of the reported precision and recall."),
+    (score_cols[3], "mAP @ 0.50", _map50, "Mean average precision at IoU 0.50."),
+    (score_cols[4], "mAP @ 0.50:0.95", _map5095, "COCO-style mean AP over IoU thresholds 0.50–0.95."),
+]:
+    with col:
+        st.metric(label, _show_metric(value), help=help_text)
+if _eval_source:
+    st.caption(f"Dataset-level metrics loaded from: {_eval_source}. Values depend on the checkpoint and evaluation split used to create that report.")
+else:
+    st.caption("Dataset-level scores are not attached to this deployment yet. Add a real evaluation report as evaluation_metrics.json or set ROADGUARD_EVAL_REPORT; no placeholder scores are shown.")
+
+st.markdown('<div class="rg-section">03 / Detection controls</div>', unsafe_allow_html=True)
 
 confidence = st.slider(
     "Detection confidence threshold",
@@ -510,6 +634,9 @@ if uploaded_file is not None:
     except Exception as exc:
         st.error(f"Could not read the uploaded image: {type(exc).__name__}.")
 
+st.markdown("""
+<div class="rg-footer">ROADGUARD AI · COMPUTER VISION RESEARCH PROTOTYPE · VERIFY BEFORE OPERATIONAL USE</div>
+""", unsafe_allow_html=True)
 st.caption(
     "RoadGuard AI is an academic prototype and should not be used as the sole "
     "basis for road-safety or maintenance decisions. The public fallback is "
