@@ -1,0 +1,5 @@
+# Install PyTorch for the target CUDA/runtime first, then install a matching
+# MMDetection/MMCV version from the official OpenMMLab compatibility guide.
+streamlit>=1.41,<2
+numpy>=1.24,<3
+Pillow>=10.0
