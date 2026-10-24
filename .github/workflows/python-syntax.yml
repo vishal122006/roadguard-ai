@@ -16,5 +16,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile Python files
-        run: python -m py_compile app.py train.py evaluate.py
+      - name: Compile project and Swin migration Python files
+        run: |
+          python -m py_compile \
+            app.py train.py evaluate.py app_swin.py \
+            configs/roadguard_swin_faster_rcnn.py \
+            configs/roadguard_swin_faster_rcnn_baseline.py \
+            scripts/convert_voc_to_coco_swin.py \
+            scripts/tune_swin_thresholds.py \
+            scripts/benchmark_swin.py
