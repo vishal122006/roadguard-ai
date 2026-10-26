@@ -91,3 +91,12 @@ This is an academic prototype. For academic submission, document the exact model
 When the public detector predicts `Other`, the app crops that region and runs [TinyCLIP ViT-8M](https://huggingface.co/wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M) over a fixed set of candidate road-surface descriptions. It displays the highest-matching candidate as `Likely ...` or `Possible ... (weak visual match)`, along with the detector score and relative visual match score. The top alternatives are available in an expander.
 
 TinyCLIP is a zero-shot vision-language classifier; its scores are relative across the supplied labels and are **not calibrated probabilities**. It may confuse visually similar categories. If it cannot load, the app explicitly reports that the type could not be estimated rather than fabricating a class. For robust domain accuracy, collect representative real crops with verified labels and train/evaluate a dedicated classification model.
+
+
+## Swin experiment tracker in Streamlit
+
+The Streamlit dashboard includes a separate Swin research tracker powered by `results/swin_tracking.json`. It distinguishes the currently measured Swin baseline from the 70% target and refreshes the tracker card every 60 seconds. The displayed 9.00% COCO mAP@0.50:0.95 is the current baseline value reported by the project owner; the 70% figure is a target, not an achieved result. The existing photo-inference checkpoint may still be YOLO and is labelled separately in inference results.
+
+After a full Colab AutoTune run, the branch notebook can publish its measured validation mAP and held-out test precision/recall/F1 to this JSON file. For that optional automated publishing step, add a Colab Secret named `ROADGUARD_GITHUB_TOKEN` with Contents read/write permission for this repository. It only commits the compact metrics JSON (not images, data, or checkpoint weights). If Streamlit Community Cloud watches `main/app.py`, the GitHub commit triggers a deployment, and the tracker reloads the updated report. Without the secret, the notebook saves reports to Google Drive instead.
+
+The Swin tuning notebook lives on the draft migration branch: [open the Colab notebook](https://github.com/vishal122006/roadguard-ai/blob/feat/swin-transformer-roadguard/notebooks/RoadGuard_SwinTransformer_AutoTune.ipynb). Training must complete before a new metric replaces the baseline.
