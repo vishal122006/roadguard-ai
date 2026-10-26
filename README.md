@@ -91,3 +91,67 @@ This is an academic prototype. For academic submission, document the exact model
 When the public detector predicts `Other`, the app crops that region and runs [TinyCLIP ViT-8M](https://huggingface.co/wkcn/TinyCLIP-ViT-8M-16-Text-3M-YFCC15M) over a fixed set of candidate road-surface descriptions. It displays the highest-matching candidate as `Likely ...` or `Possible ... (weak visual match)`, along with the detector score and relative visual match score. The top alternatives are available in an expander.
 
 TinyCLIP is a zero-shot vision-language classifier; its scores are relative across the supplied labels and are **not calibrated probabilities**. It may confuse visually similar categories. If it cannot load, the app explicitly reports that the type could not be estimated rather than fabricating a class. For robust domain accuracy, collect representative real crops with verified labels and train/evaluate a dedicated classification model.
+
+
+---
+
+## Swin Transformer edition (MAAI 901)
+
+A migration candidate is available on the `feat/swin-transformer-roadguard` branch. It adds **Swin-T + FPN + Faster R-CNN** as an alternative to the existing YOLO pipeline, without silently switching the deployed app or overwriting the current checkpoint.
+
+- Model config: `configs/roadguard_swin_faster_rcnn.py`
+- Controlled reference config: `configs/roadguard_swin_faster_rcnn_baseline.py`
+- Inference UI (requires a trained checkpoint): `app_swin.py`
+- Pascal VOC conversion: `scripts/convert_voc_to_coco_swin.py`
+- Validation-only class threshold tuning / frozen test F1: `scripts/tune_swin_thresholds.py`
+- Latency and model-size measurements: `scripts/benchmark_swin.py`
+- Full workflow: `SWIN_MIGRATION.md`
+
+### Swin workflow
+
+First prepare paired labelled XML and image files. Convert and audit them:
+
+```bash
+python scripts/convert_voc_to_coco_swin.py --images data/RDD2022/images --annotations data/RDD2022/annotations --out data/RDD2022_coco
+```
+
+Use an optional `--group-regex` when filenames encode route/video sequences so adjacent frames stay together. Inspect split class counts and sampled bounding-box overlays. For a dataset that already has an official labelled split, preserve it instead of creating a new random split.
+
+Install a PyTorch/CUDA/MMCV/MMEngine/MMDetection combination that matches the official OpenMMLab compatibility matrix. From an MMDetection checkout, copy the configs into its `configs/` directory and put `data/RDD2022_coco/` under that checkout. Train:
+
+```bash
+python tools/train.py configs/roadguard_swin_faster_rcnn.py
+python tools/test.py configs/roadguard_swin_faster_rcnn.py /path/to/selected_checkpoint.pth
+```
+
+Tune class-specific F1 thresholds on validation only, then freeze them and evaluate on test:
+
+```bash
+python scripts/tune_swin_thresholds.py --config configs/roadguard_swin_faster_rcnn.py --checkpoint /path/to/selected_checkpoint.pth --data-root data/RDD2022_coco --split val --mode tune --out runs/thresholds
+python scripts/tune_swin_thresholds.py --config configs/roadguard_swin_faster_rcnn.py --checkpoint /path/to/selected_checkpoint.pth --data-root data/RDD2022_coco --split test --mode evaluate --thresholds-json runs/thresholds/best_thresholds.json --out runs/final_test
+python scripts/benchmark_swin.py --config configs/roadguard_swin_faster_rcnn.py --checkpoint /path/to/selected_checkpoint.pth --source /path/to/real_road_photos --out runs/inference_benchmark.json
+```
+
+Copy the trained checkpoint to `checkpoints/roadguard_swin.pth` and run `streamlit run app_swin.py`. Set `ROADGUARD_CONFIG`, `ROADGUARD_CHECKPOINT`, and `ROADGUARD_THRESHOLDS` if you use different paths.
+
+### Do not claim an improvement before measurement
+
+The Swin config tests possible improvements through multi-scale training, smaller RPN anchors, pretrained Swin features, and conservative fine-tuning. It does **not** guarantee better precision, recall, F1, or mAP. Select model weights on validation mAP, select F1 thresholds on validation, then use the held-out test split once. Report mAP@0.50 and mAP@0.50:0.95, classwise AP, precision/recall/F1 at a stated IoU, per-class false positives/negatives, latency, hardware and software versions. The existing YOLO app remains available as a rollback until the trained Swin model has been reviewed.
+
+
+## Automatic Swin tuning in Google Colab
+
+A guided notebook is now checked into this branch: [`notebooks/RoadGuard_SwinTransformer_AutoTune.ipynb`](notebooks/RoadGuard_SwinTransformer_AutoTune.ipynb).
+
+The workflow:
+1. Checks for a GPU and installs a compatible MMDetection 3.x runtime.
+2. Downloads the labelled RDD2022 India archive and pairs unambiguous image/XML annotations.
+3. Converts annotations to COCO and audits split/label integrity.
+4. Trains three Swin-T hyperparameter candidates and ranks them by validation COCO bbox mAP.
+5. Fine-tunes the selected candidate.
+6. Tunes per-class confidence thresholds on validation, with a requested precision operating point where supported.
+7. Evaluates the frozen model and thresholds on held-out test data, then measures inference speed and saves artifacts to Google Drive.
+
+Scripts are in `scripts/auto_tune_swin.py`, `scripts/check_dataset.py`, `scripts/convert_voc_to_coco.py`, `scripts/tune_thresholds.py`, and `scripts/benchmark_inference.py`.
+
+**Use the notebook only after reviewing the dataset pairing and class counts.** If the runtime's PyTorch/CUDA build is incompatible with MMCV, use the official OpenMMLab compatibility instructions instead of forcing package upgrades. The current YOLO app remains the rollback. No improved accuracy/precision/F1 is claimed until the measured held-out test results are available.
