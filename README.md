@@ -137,3 +137,21 @@ Copy the trained checkpoint to `checkpoints/roadguard_swin.pth` and run `streaml
 ### Do not claim an improvement before measurement
 
 The Swin config tests possible improvements through multi-scale training, smaller RPN anchors, pretrained Swin features, and conservative fine-tuning. It does **not** guarantee better precision, recall, F1, or mAP. Select model weights on validation mAP, select F1 thresholds on validation, then use the held-out test split once. Report mAP@0.50 and mAP@0.50:0.95, classwise AP, precision/recall/F1 at a stated IoU, per-class false positives/negatives, latency, hardware and software versions. The existing YOLO app remains available as a rollback until the trained Swin model has been reviewed.
+
+
+## Automatic Swin tuning in Google Colab
+
+A guided notebook is now checked into this branch: [`notebooks/RoadGuard_SwinTransformer_AutoTune.ipynb`](notebooks/RoadGuard_SwinTransformer_AutoTune.ipynb).
+
+The workflow:
+1. Checks for a GPU and installs a compatible MMDetection 3.x runtime.
+2. Downloads the labelled RDD2022 India archive and pairs unambiguous image/XML annotations.
+3. Converts annotations to COCO and audits split/label integrity.
+4. Trains three Swin-T hyperparameter candidates and ranks them by validation COCO bbox mAP.
+5. Fine-tunes the selected candidate.
+6. Tunes per-class confidence thresholds on validation, with a requested precision operating point where supported.
+7. Evaluates the frozen model and thresholds on held-out test data, then measures inference speed and saves artifacts to Google Drive.
+
+Scripts are in `scripts/auto_tune_swin.py`, `scripts/check_dataset.py`, `scripts/convert_voc_to_coco.py`, `scripts/tune_thresholds.py`, and `scripts/benchmark_inference.py`.
+
+**Use the notebook only after reviewing the dataset pairing and class counts.** If the runtime's PyTorch/CUDA build is incompatible with MMCV, use the official OpenMMLab compatibility instructions instead of forcing package upgrades. The current YOLO app remains the rollback. No improved accuracy/precision/F1 is claimed until the measured held-out test results are available.
