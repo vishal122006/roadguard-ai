@@ -288,7 +288,74 @@ if _eval_source:
 else:
     st.caption("Dataset-level scores are not attached to this deployment yet. Add a real evaluation report as evaluation_metrics.json or set ROADGUARD_EVAL_REPORT; no placeholder scores are shown.")
 
-st.markdown('<div class="rg-section">03 / Detection controls</div>', unsafe_allow_html=True)
+st.markdown('<div class="rg-section">03 / Swin experiment tracker</div>', unsafe_allow_html=True)
+
+SWIN_TRACKING_PATH = APP_DIR / "results" / "swin_tracking.json"
+
+@st.fragment(run_every="60s")
+def _render_swin_tracking():
+    """Refresh the research metric card from the small JSON report every minute."""
+    try:
+        tracking = json.loads(SWIN_TRACKING_PATH.read_text(encoding="utf-8"))
+        if not isinstance(tracking, dict):
+            raise ValueError("Tracking report must be a JSON object.")
+    except FileNotFoundError:
+        st.warning("No Swin tracking report is available yet. The dashboard will display metrics after a tracking report is committed.")
+        return
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        st.warning(f"Could not read Swin tracking report: {exc}")
+        return
+
+    value = tracking.get("metric_value_percent")
+    target = tracking.get("target_percent", 70.0)
+    model_name = str(tracking.get("model", "Swin-Tiny + FPN + Faster R-CNN"))
+    epoch = tracking.get("epoch")
+    stage = str(tracking.get("stage", "baseline"))
+    metric_name = str(tracking.get("metric_name", "COCO mAP@0.50:0.95 (validation)"))
+    fine_tuned_evaluated = bool(tracking.get("fine_tuned_evaluated", False))
+    split = str(tracking.get("split", "validation")).title()
+    last_updated = str(tracking.get("last_updated_utc", "")).strip()
+
+    try:
+        value = float(value) if value is not None else None
+        target = float(target)
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError("metric_value_percent must be between 0 and 100.")
+        if not (0 < target <= 100):
+            raise ValueError("target_percent must be between 0 and 100.")
+    except (TypeError, ValueError) as exc:
+        st.warning(f"Swin tracking report contains invalid metric values: {exc}")
+        return
+
+    metric_cols = st.columns([1.15, 2.5, 1.1], gap="large")
+    with metric_cols[0]:
+        st.metric(metric_name, f"{value:.2f}%" if value is not None else "Not recorded",
+                  help="Measured dataset-level detection metric from the saved Swin training report. It is mAP, not generic classification accuracy.")
+    with metric_cols[1]:
+        epoch_text = f", epoch {epoch}" if epoch is not None else ""
+        st.markdown(f"**Current {stage.replace('_', ' ')}: {model_name}{epoch_text}**")
+        if not fine_tuned_evaluated:
+            st.write("The fine-tuned model has not yet been evaluated; no improvement is being claimed.")
+        else:
+            st.write(f"Latest saved result is from the {split.lower()} evaluation. Review held-out test results before claiming generalization.")
+        if last_updated:
+            st.caption(f"Report timestamp (UTC): {last_updated}")
+    with metric_cols[2]:
+        st.metric("Target mAP goal", f"{target:.0f}%",
+                  help="Project target, not an achieved or guaranteed result.")
+
+    if value is not None:
+        progress = max(0.0, min(1.0, value / target))
+        st.progress(progress, text=f"{progress * 100:.1f}% of the target value — progress indicator only, not a second accuracy score.")
+        if value >= target:
+            st.success("The validation metric meets the target. Confirm performance on the held-out test set.")
+        else:
+            st.caption(f"Remaining to target: {max(0.0, target - value):.2f} percentage points.")
+    st.caption("This Swin research tracker is separate from the checkpoint used for photo detections. It rereads the GitHub-deployed JSON report every 60 seconds; updating the report in GitHub triggers the Streamlit deployment to refresh its data.")
+
+_render_swin_tracking()
+
+st.markdown('<div class="rg-section">04 / Detection controls</div>', unsafe_allow_html=True)
 
 confidence = st.slider(
     "Detection confidence threshold",
