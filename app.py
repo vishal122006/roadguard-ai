@@ -266,29 +266,7 @@ def _show_metric(value):
     return f"{value:.2f}%" if value is not None else "Not recorded"
 
 
-st.markdown('<div class="rg-section">02 / Evaluation scorecard</div>', unsafe_allow_html=True)
-_eval_data, _eval_source = _load_evaluation_metrics()
-_p = _metric_value(_eval_data, ["metrics/precision(B)", "precision", "box_precision", "P"])
-_r = _metric_value(_eval_data, ["metrics/recall(B)", "recall", "box_recall", "R"])
-_map50 = _metric_value(_eval_data, ["metrics/mAP50(B)", "mAP50", "map50", "AP50"])
-_map5095 = _metric_value(_eval_data, ["metrics/mAP50-95(B)", "mAP50-95", "map50-95", "AP"])
-_f1 = (2 * _p * _r / (_p + _r)) if _p is not None and _r is not None and (_p + _r) else None
-score_cols = st.columns(5, gap="small")
-for col, label, value, help_text in [
-    (score_cols[0], "Precision", _p, "Of predicted detections, the share that are correct under the evaluation protocol."),
-    (score_cols[1], "Recall", _r, "Of annotated objects, the share successfully detected."),
-    (score_cols[2], "F1 score", _f1, "Harmonic mean of the reported precision and recall."),
-    (score_cols[3], "mAP @ 0.50", _map50, "Mean average precision at IoU 0.50."),
-    (score_cols[4], "mAP @ 0.50:0.95", _map5095, "COCO-style mean AP over IoU thresholds 0.50–0.95."),
-]:
-    with col:
-        st.metric(label, _show_metric(value), help=help_text)
-if _eval_source:
-    st.caption(f"Dataset-level metrics loaded from: {_eval_source}. Values depend on the checkpoint and evaluation split used to create that report.")
-else:
-    st.caption("Dataset-level scores are not attached to this deployment yet. Add a real evaluation report as evaluation_metrics.json or set ROADGUARD_EVAL_REPORT; no placeholder scores are shown.")
-
-st.markdown('<div class="rg-section">03 / Swin experiment tracker</div>', unsafe_allow_html=True)
+st.markdown('<div class="rg-section">02 / Current model accuracy & performance</div>', unsafe_allow_html=True)
 
 SWIN_TRACKING_PATH = APP_DIR / "results" / "swin_tracking.json"
 
@@ -354,6 +332,28 @@ def _render_swin_tracking():
     st.caption("This Swin research tracker is separate from the checkpoint used for photo detections. It rereads the GitHub-deployed JSON report every 60 seconds; updating the report in GitHub triggers the Streamlit deployment to refresh its data.")
 
 _render_swin_tracking()
+
+st.markdown('<div class="rg-section">03 / Detailed evaluation metrics</div>', unsafe_allow_html=True)
+_eval_data, _eval_source = _load_evaluation_metrics()
+_p = _metric_value(_eval_data, ["metrics/precision(B)", "precision", "box_precision", "P"])
+_r = _metric_value(_eval_data, ["metrics/recall(B)", "recall", "box_recall", "R"])
+_map50 = _metric_value(_eval_data, ["metrics/mAP50(B)", "mAP50", "map50", "AP50"])
+_map5095 = _metric_value(_eval_data, ["metrics/mAP50-95(B)", "mAP50-95", "map50-95", "AP"])
+_f1 = (2 * _p * _r / (_p + _r)) if _p is not None and _r is not None and (_p + _r) else None
+score_cols = st.columns(5, gap="small")
+for col, label, value, help_text in [
+    (score_cols[0], "Precision", _p, "Of predicted detections, the share that are correct under the evaluation protocol."),
+    (score_cols[1], "Recall", _r, "Of annotated objects, the share successfully detected."),
+    (score_cols[2], "F1 score", _f1, "Harmonic mean of the reported precision and recall."),
+    (score_cols[3], "mAP @ 0.50", _map50, "Mean average precision at IoU 0.50."),
+    (score_cols[4], "mAP @ 0.50:0.95", _map5095, "COCO-style mean AP over IoU thresholds 0.50–0.95."),
+]:
+    with col:
+        st.metric(label, _show_metric(value), help=help_text)
+if _eval_source:
+    st.caption(f"Dataset-level metrics loaded from: {_eval_source}. Values depend on the checkpoint and evaluation split used to create that report.")
+else:
+    st.caption("Dataset-level scores are not attached to this deployment yet. Add a real evaluation report as evaluation_metrics.json or set ROADGUARD_EVAL_REPORT; no placeholder scores are shown.")
 
 st.markdown('<div class="rg-section">04 / Detection controls</div>', unsafe_allow_html=True)
 
