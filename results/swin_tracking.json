@@ -1,0 +1,13 @@
+{
+  "model": "Swin-Tiny + FPN + Faster R-CNN",
+  "stage": "baseline",
+  "epoch": 5,
+  "split": "validation",
+  "metric_name": "COCO mAP@0.50:0.95 (validation)",
+  "metric_value_percent": 9,
+  "target_percent": 70,
+  "fine_tuned_evaluated": false,
+  "last_updated_utc": "2026-10-26T00:00:00Z",
+  "source": "Current baseline dashboard value supplied by the project owner",
+  "note": "70% is a project target, not an achieved result. Replace this report with measured validation metrics after the fine-tuned model has been evaluated."
+}
